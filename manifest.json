@@ -3,6 +3,9 @@
   "name": "Twitter(X) Auto Liker",
   "version": "1.0",
   "description": "Twitter(X)の自動いいねツール",
+  "icons": {
+    "128": "icon128.png"
+  },
   "permissions": [
     "activeTab"
   ],
