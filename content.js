@@ -1,28 +1,25 @@
 // content.js
 
 // --- 設定 ---
-const MIN_DELAY = 1000;  // 1秒（通常速度）
+const MIN_DELAY = 1000;  // 1秒
 const MAX_DELAY = 3000;  // 3秒
 const SESSION_LIMIT = 49;     // 1回の連続実行上限
 const COOLDOWN_TIME = 15 * 60; // 15分（秒換算）
-const DAILY_LIMIT = 990;      // 1日の上限（999ギリギリは怖いので990で停止）
+const DAILY_LIMIT = 990;      // 1日の上限
 
 // --- 変数 ---
 let isRunning = false;
 let isCoolingDown = false;
 let timer = null;
 let cooldownTimer = null;
-let sessionCount = 0; // 今回のセッションでのいいね数
+let sessionCount = 0;
+let panelVisible = false; // パネルが表示されているか
 
-// --- ストレージ管理（1日の制限用） ---
+// --- ストレージ管理 ---
 function getDailyData() {
   const today = new Date().toLocaleDateString();
   const data = JSON.parse(localStorage.getItem('tw_auto_like_data') || '{}');
-  
-  // 日付が変わっていたらリセット
-  if (data.date !== today) {
-    return { date: today, count: 0 };
-  }
+  if (data.date !== today) return { date: today, count: 0 };
   return data;
 }
 
@@ -37,14 +34,32 @@ function getDailyCount() {
   return getDailyData().count;
 }
 
-// --- UI作成 ---
+// --- UI構築 ---
 const panel = document.createElement('div');
 panel.style.cssText = `
   position: fixed; bottom: 20px; right: 20px; width: 260px;
   background: rgba(0, 0, 0, 0.9); color: #fff; padding: 15px;
   border-radius: 10px; z-index: 9999; font-family: sans-serif; font-size: 13px;
   box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 1px solid #333;
+  display: none; /* 最初は非表示 */
 `;
+
+// 閉じるボタン (✖)
+const closeBtn = document.createElement('button');
+closeBtn.innerText = "✖";
+closeBtn.title = "閉じる（停止）";
+closeBtn.style.cssText = `
+  position: absolute; top: 8px; right: 8px;
+  background: transparent; color: #888; border: none;
+  cursor: pointer; font-size: 14px; padding: 0;
+`;
+closeBtn.onmouseover = () => closeBtn.style.color = "#fff";
+closeBtn.onmouseout = () => closeBtn.style.color = "#888";
+closeBtn.onclick = () => {
+  stopBot(); // 停止処理
+  panel.style.display = "none"; // 非表示にする
+  panelVisible = false;
+};
 
 // ステータス表示エリア
 const statusArea = document.createElement('div');
@@ -54,7 +69,6 @@ statusArea.innerText = "待機中";
 // カウンター表示エリア
 const countArea = document.createElement('div');
 countArea.style.cssText = "margin-bottom: 10px; font-size: 12px; color: #ccc; line-height: 1.5;";
-updateCountDisplay();
 
 // ログエリア
 const logArea = document.createElement('div');
@@ -63,7 +77,7 @@ logArea.style.cssText = `
   padding: 5px; border: 1px solid #444; border-radius: 4px; font-family: monospace; font-size: 11px;
 `;
 
-// ボタン
+// 開始ボタン
 const actionBtn = document.createElement('button');
 actionBtn.innerText = "▶ 開始";
 actionBtn.style.cssText = `
@@ -71,13 +85,34 @@ actionBtn.style.cssText = `
   border: none; border-radius: 20px; cursor: pointer; font-weight: bold;
 `;
 
+// 要素の追加
+panel.appendChild(closeBtn);
 panel.appendChild(statusArea);
 panel.appendChild(countArea);
 panel.appendChild(logArea);
 panel.appendChild(actionBtn);
-document.body.appendChild(panel);
+document.body.appendChild(panel); // ページに埋め込んでおく（非表示状態で）
 
-// --- ヘルパー関数 ---
+// --- 機能関数 ---
+
+function stopBot() {
+  isRunning = false;
+  clearTimeout(timer);
+  // クールダウン中はタイマーを止めない仕様にするか、完全に止めるか
+  // ここでは「閉じる＝完全停止」とします
+  clearInterval(cooldownTimer);
+  isCoolingDown = false;
+  
+  actionBtn.innerText = "▶ 開始";
+  actionBtn.disabled = false;
+  actionBtn.style.background = "#1d9bf0";
+  statusArea.innerText = "停止中";
+  statusArea.style.color = "#ccc";
+  
+  highlightTweet(null);
+  log("停止しました");
+}
+
 function log(msg) {
   const time = new Date().toLocaleTimeString().split(' ')[0];
   const p = document.createElement('div');
@@ -89,7 +124,7 @@ function updateCountDisplay() {
   const daily = getDailyCount();
   countArea.innerHTML = `
     連続実行: <span style="color: #fff; font-weight:bold;">${sessionCount}</span> / ${SESSION_LIMIT}<br>
-    本日合計: <span style="color: ${daily >= DAILY_LIMIT ? 'red' : '#fff'}; font-weight:bold;">${daily}</span> / 999
+    本日合計: <span style="color: ${daily >= DAILY_LIMIT ? 'red' : '#fff'}; font-weight:bold;">${daily}</span> / 990
   `;
 }
 
@@ -105,13 +140,14 @@ function highlightTweet(button) {
   if (button) {
     const article = button.closest('article');
     if (article) {
-      article.style.border = '3px solid #1d9bf0'; // 青枠
+      article.style.border = '3px solid #1d9bf0';
       article.classList.add('auto-like-target');
     }
   }
 }
 
-// --- クールダウン処理（15分ロック） ---
+// --- メインロジック ---
+
 function startCooldown() {
   isRunning = false;
   isCoolingDown = true;
@@ -122,8 +158,7 @@ function startCooldown() {
   actionBtn.innerText = "休憩中 (ロック)";
   
   let remaining = COOLDOWN_TIME;
-  
-  log(`49回達成。15分間の休憩に入ります。`);
+  log(`49回達成。15分休憩します。`);
   
   cooldownTimer = setInterval(() => {
     remaining--;
@@ -135,7 +170,7 @@ function startCooldown() {
     if (remaining <= 0) {
       clearInterval(cooldownTimer);
       isCoolingDown = false;
-      sessionCount = 0; // セッションリセット
+      sessionCount = 0;
       actionBtn.disabled = false;
       actionBtn.innerText = "▶ 再開可能";
       actionBtn.style.background = "#1d9bf0";
@@ -147,7 +182,6 @@ function startCooldown() {
   }, 1000);
 }
 
-// --- 探索＆いいね処理 ---
 function getNextLikeButton() {
   const articles = Array.from(document.querySelectorAll('article'));
   if (articles.length === 0) return null;
@@ -169,20 +203,18 @@ function getNextLikeButton() {
 function autoLikeLoop() {
   if (!isRunning) return;
 
-  // 1. 1日の上限チェック
   const daily = getDailyCount();
   if (daily >= DAILY_LIMIT) {
     isRunning = false;
     actionBtn.innerText = "上限到達";
     actionBtn.style.background = "#555";
     actionBtn.disabled = true;
-    statusArea.innerText = "本日の上限(990回)に達しました";
+    statusArea.innerText = "本日の上限に達しました";
     statusArea.style.color = "red";
-    log("本日の上限に達しました。明日の朝まで停止します。");
+    log("本日の上限です。");
     return;
   }
 
-  // 2. セッション上限チェック (49回)
   if (sessionCount >= SESSION_LIMIT) {
     startCooldown();
     return;
@@ -198,16 +230,13 @@ function autoLikeLoop() {
       if (!isRunning) return;
       
       targetButton.click();
-      
-      // カウント更新
       sessionCount++;
       const currentDaily = incrementDailyCount();
       updateCountDisplay();
-      log(`いいね！ (連続${sessionCount} / 本日${currentDaily})`);
+      log(`いいね完了 (${sessionCount}/${SESSION_LIMIT})`);
       highlightTweet(null);
 
-      const nextDelay = getRandomDelay();
-      timer = setTimeout(autoLikeLoop, nextDelay);
+      timer = setTimeout(autoLikeLoop, getRandomDelay());
     }, 1000);
 
   } else {
@@ -218,22 +247,15 @@ function autoLikeLoop() {
   }
 }
 
-// --- ボタンイベント ---
+// --- イベントリスナー ---
+
+// 開始ボタンクリック
 actionBtn.addEventListener('click', () => {
-  if (isCoolingDown) return; // ロック中は無視
+  if (isCoolingDown) return;
 
   if (isRunning) {
-    // 停止
-    isRunning = false;
-    clearTimeout(timer);
-    actionBtn.innerText = "▶ 開始";
-    actionBtn.style.background = "#1d9bf0";
-    statusArea.innerText = "停止中";
-    statusArea.style.color = "#ccc";
-    log("一時停止しました");
-    highlightTweet(null);
+    stopBot(); // 停止
   } else {
-    // 開始
     if (getDailyCount() >= DAILY_LIMIT) {
       log("本日の上限を超えています");
       return;
@@ -248,5 +270,23 @@ actionBtn.addEventListener('click', () => {
   }
 });
 
+// background.js からのメッセージ受信（アイコンクリック時）
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === "togglePanel") {
+    if (panelVisible) {
+      // すでに表示されていたら非表示にする（閉じるボタンと同じ動作）
+      panel.style.display = "none";
+      panelVisible = false;
+    } else {
+      // 表示する
+      panel.style.display = "block";
+      panelVisible = true;
+      updateCountDisplay();
+      log("パネルを表示しました");
+    }
+  }
+});
+
+// 初期化
 updateCountDisplay();
-log("システム準備完了");
+log("システム準備完了: アイコンをクリックして表示");
