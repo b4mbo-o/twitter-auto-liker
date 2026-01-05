@@ -37,7 +37,7 @@ function getDailyCount() {
 // --- UI構築 ---
 const panel = document.createElement('div');
 panel.style.cssText = `
-  position: fixed; bottom: 20px; right: 20px; width: 260px;
+  position: fixed; top: 20px; right: 20px; width: 260px;
   background: rgba(0, 0, 0, 0.9); color: #fff; padding: 15px;
   border-radius: 10px; z-index: 9999; font-family: sans-serif; font-size: 13px;
   box-shadow: 0 4px 8px rgba(0,0,0,0.5); border: 1px solid #333;
